@@ -79,6 +79,9 @@ class AddressGroup
                                     if (isset($result['longitude'])) {
                                         data_set($data, $prefix.'.longitude', $result['longitude']);
                                     }
+                                    if (isset($result['latitude'], $result['longitude'])) {
+                                        data_set($data, $prefix.'.coordinates', $result['latitude'].', '.$result['longitude']);
+                                    }
                                     /** @phpstan-ignore-next-line */
                                     $livewire->data = $data;
                                 }
@@ -121,14 +124,32 @@ class AddressGroup
     {
         if ($showCoordinates) {
             return [
-                TextInput::make($prefix.'.latitude')
-                    ->label('Breedtegraad')
-                    ->maxLength(10)
-                    ->placeholder('52.123456'),
-                TextInput::make($prefix.'.longitude')
-                    ->label('Lengtegraad')
-                    ->maxLength(9)
-                    ->placeholder('4.123456'),
+                Hidden::make($prefix.'.latitude'),
+                Hidden::make($prefix.'.longitude'),
+                TextInput::make($prefix.'.coordinates')
+                    ->label('Coordinaten')
+                    ->placeholder('52.123456, 4.123456')
+                    ->columnSpan(2)
+                    ->dehydrated(false)
+                    ->afterStateHydrated(function (TextInput $component, Get $get) use ($prefix) {
+                        $lat = $get($prefix.'.latitude');
+                        $lng = $get($prefix.'.longitude');
+                        if ($lat && $lng) {
+                            $component->state($lat.', '.$lng);
+                        }
+                    })
+                    ->live(onBlur: true)
+                    ->afterStateUpdated(function (Set $set, ?string $state) use ($prefix) {
+                        if (blank($state)) {
+                            $set($prefix.'.latitude', null);
+                            $set($prefix.'.longitude', null);
+
+                            return;
+                        }
+                        $parts = array_map('trim', explode(',', $state));
+                        $set($prefix.'.latitude', $parts[0] ?? null);
+                        $set($prefix.'.longitude', $parts[1] ?? null);
+                    }),
             ];
         }
 
@@ -170,6 +191,9 @@ class AddressGroup
             }
             if (isset($result['longitude'])) {
                 $set($prefix.'.longitude', $result['longitude']);
+            }
+            if (isset($result['latitude'], $result['longitude'])) {
+                $set($prefix.'.coordinates', $result['latitude'].', '.$result['longitude']);
             }
         }
     }
