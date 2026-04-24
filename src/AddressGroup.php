@@ -7,7 +7,7 @@ use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Component as FilamentComponent;
-use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 
@@ -34,9 +34,9 @@ class AddressGroup
      * @param  bool  $required  Whether the address fields are required
      * @param  bool  $showCoordinates  Whether to show latitude/longitude as visible fields
      */
-    public static function make(string $prefix = 'address', bool $required = true, bool $showCoordinates = false): Fieldset
+    public static function make(string $prefix = 'address', bool $required = true, bool $showCoordinates = false): Grid
     {
-        return Fieldset::make('Adres')
+        return Grid::make()
             ->schema([
                 TextInput::make($prefix.'.postalCode')
                     ->label('Postcode')

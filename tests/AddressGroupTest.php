@@ -2,19 +2,18 @@
 
 use Chargit\AddressComponent\AddressGroup;
 use Chargit\AddressComponent\PostcodeLookupService;
-use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Grid;
 
-test('make returns a fieldset component', function () {
-    $fieldset = AddressGroup::make();
+test('make returns a grid component without border', function () {
+    $grid = AddressGroup::make();
 
-    expect($fieldset)->toBeInstanceOf(Fieldset::class)
-        ->and($fieldset->getLabel())->toBe('Adres');
+    expect($grid)->toBeInstanceOf(Grid::class);
 });
 
-test('fieldset has three columns layout', function () {
-    $fieldset = AddressGroup::make();
+test('grid has three columns layout', function () {
+    $grid = AddressGroup::make();
 
-    expect($fieldset->getColumns())->toMatchArray(['lg' => 3]);
+    expect($grid->getColumns())->toMatchArray(['lg' => 3]);
 });
 
 test('postcode lookup service is called with correct parameters', function () {
