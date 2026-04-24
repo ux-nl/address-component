@@ -44,7 +44,15 @@ class AddressGroup
                     ->maxLength(10)
                     ->autocomplete('postal-code')
                     ->live(onBlur: true)
-                    ->afterStateUpdated(fn (Get $get, Set $set) => self::autoLookup($prefix, $get, $set)),
+                    ->afterStateUpdated(function (Get $get, Set $set, ?string $state) use ($prefix) {
+                        if (blank($state)) {
+                            self::clearLookupResults($prefix, $set);
+
+                            return;
+                        }
+
+                        self::autoLookup($prefix, $get, $set);
+                    }),
                 TextInput::make($prefix.'.houseNumber')
                     ->label('Huisnummer')
                     ->required($required)
@@ -127,7 +135,7 @@ class AddressGroup
                 Hidden::make($prefix.'.latitude'),
                 Hidden::make($prefix.'.longitude'),
                 TextInput::make($prefix.'.coordinates')
-                    ->label('Coordinaten')
+                    ->label('GPS-coördinaten')
                     ->placeholder('52.123456, 4.123456')
                     ->columnSpan(2)
                     ->dehydrated(false)
@@ -157,6 +165,19 @@ class AddressGroup
             Hidden::make($prefix.'.latitude'),
             Hidden::make($prefix.'.longitude'),
         ];
+    }
+
+    /**
+     * Clear the fields that are populated by the postcode/house-number lookup
+     * so a cleared postcode doesn't leave a stale street/city behind.
+     */
+    private static function clearLookupResults(string $prefix, Set $set): void
+    {
+        $set($prefix.'.street', null);
+        $set($prefix.'.city', null);
+        $set($prefix.'.latitude', null);
+        $set($prefix.'.longitude', null);
+        $set($prefix.'.coordinates', null);
     }
 
     /**
