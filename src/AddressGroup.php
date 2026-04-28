@@ -100,7 +100,7 @@ class AddressGroup
                 Hidden::make($prefix.'.latitude')->required($coordinatesRequired),
                 Hidden::make($prefix.'.longitude')->required($coordinatesRequired),
                 TextInput::make($prefix.'.coordinates')
-                    ->label('GPS-coördinaten')
+                    ->label('GPS locatie')
                     ->placeholder('52.123456, 4.123456')
                     ->required($coordinatesRequired)
                     ->columnSpan(2)
@@ -127,7 +127,7 @@ class AddressGroup
                     ->suffixAction(
                         Action::make('fetchCoordinates')
                             ->icon('heroicon-m-map-pin')
-                            ->tooltip('Haal GPS-coördinaten op uit het adres')
+                            ->tooltip('Haal GPS locatie op uit het adres')
                             ->action(function (Get $get, Set $set) use ($prefix) {
                                 $result = app(PostcodeLookupService::class)->geocodeCoordinates([
                                     'street' => $get($prefix.'.street'),
