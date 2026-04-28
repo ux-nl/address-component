@@ -85,6 +85,92 @@ class PostcodeLookupService
     }
 
     /**
+     * Geocode coordinates from a (partial) address using Google Maps Geocoding API.
+     * Used by the "fetch coordinates from address" action — accepts whatever fields
+     * are currently filled in and returns the best matching latitude/longitude.
+     *
+     * @param  array{street?: ?string, houseNumber?: ?string, addition?: ?string, postalCode?: ?string, city?: ?string, country?: ?string}  $address
+     * @return array{latitude: string, longitude: string}|null
+     */
+    public function geocodeCoordinates(array $address): ?array
+    {
+        $apiKey = config('address-component.google_api_key');
+
+        if (empty($apiKey)) {
+            Log::error('Google Maps API key is not configured');
+            $this->sendErrorNotification();
+
+            return null;
+        }
+
+        $country = $address['country'] ?? 'NLD';
+        $alpha2 = self::COUNTRY_ALPHA2_MAP[$country] ?? null;
+
+        if (! $alpha2) {
+            Log::warning('Unsupported country code for geocoding', ['country' => $country]);
+            $this->sendNotFoundNotification();
+
+            return null;
+        }
+
+        $streetLine = trim(($address['street'] ?? '').' '.($address['houseNumber'] ?? '').($address['addition'] ?? ''));
+        $localityLine = trim(($address['postalCode'] ?? '').' '.($address['city'] ?? ''));
+
+        $query = trim($streetLine.', '.$localityLine, ', ');
+
+        if ($query === '') {
+            $this->sendNotFoundNotification();
+
+            return null;
+        }
+
+        try {
+            $response = Http::get('https://maps.googleapis.com/maps/api/geocode/json', [
+                'key' => $apiKey,
+                'address' => $query,
+                'components' => 'country:'.$alpha2,
+            ]);
+
+            if (! $response->successful()) {
+                $this->sendErrorNotification();
+
+                return null;
+            }
+
+            $data = $response->json();
+
+            if (($data['status'] ?? '') !== 'OK' || empty($data['results'][0]['geometry']['location'])) {
+                $this->sendNotFoundNotification();
+
+                Log::warning('Google Maps coordinate lookup returned no results', [
+                    'query' => $query,
+                    'country' => $country,
+                    'status' => $data['status'] ?? 'unknown',
+                ]);
+
+                return null;
+            }
+
+            $location = $data['results'][0]['geometry']['location'];
+
+            return [
+                'latitude' => (string) $location['lat'],
+                'longitude' => (string) $location['lng'],
+            ];
+        } catch (\Exception $e) {
+            $this->sendErrorNotification();
+
+            Log::error('Google Maps coordinate lookup failed', [
+                'query' => $query,
+                'country' => $country,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
      * Geocode a foreign address using Google Maps Geocoding API.
      *
      * @return array{street: string, city: string, postalCode: string, houseNumber: string, latitude: string|null, longitude: string|null}|null
@@ -197,7 +283,7 @@ class PostcodeLookupService
         Notification::make()
             ->warning()
             ->title('Adres niet gevonden')
-            ->body('De postcode en huisnummer combinatie is niet gevonden. U kunt het adres handmatig invullen.')
+            ->body('De postcode en huisnummer combinatie is niet gevonden. Je kunt het adres handmatig invullen.')
             ->send();
     }
 

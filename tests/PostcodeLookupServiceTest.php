@@ -214,6 +214,68 @@ test('lookup returns null when google maps returns no results for foreign addres
         ->with('Google Maps geocoding returned no results', Mockery::type('array'));
 });
 
+test('geocodeCoordinates returns lat/lng from full address', function () {
+    Http::fake([
+        'maps.googleapis.com/maps/api/geocode/*' => Http::response([
+            'status' => 'OK',
+            'results' => [[
+                'geometry' => ['location' => ['lat' => 52.3676, 'lng' => 4.9041]],
+            ]],
+        ]),
+    ]);
+
+    $service = app(PostcodeLookupService::class);
+    $result = $service->geocodeCoordinates([
+        'street' => 'Damrak',
+        'houseNumber' => '1',
+        'postalCode' => '1012LG',
+        'city' => 'Amsterdam',
+        'country' => 'NLD',
+    ]);
+
+    expect($result)->toBeArray()
+        ->and($result['latitude'])->toBe('52.3676')
+        ->and($result['longitude'])->toBe('4.9041');
+
+    Http::assertSent(function ($request) {
+        return str_contains($request->url(), 'maps.googleapis.com')
+            && str_contains($request->url(), 'components=country%3ANL')
+            && str_contains(urldecode($request->url()), 'Damrak 1');
+    });
+});
+
+test('geocodeCoordinates returns null when address is empty', function () {
+    $service = app(PostcodeLookupService::class);
+    $result = $service->geocodeCoordinates([
+        'country' => 'NLD',
+    ]);
+
+    expect($result)->toBeNull();
+});
+
+test('geocodeCoordinates returns null when google maps returns no results', function () {
+    Http::fake([
+        'maps.googleapis.com/maps/api/geocode/*' => Http::response([
+            'status' => 'ZERO_RESULTS',
+            'results' => [],
+        ]),
+    ]);
+
+    $service = app(PostcodeLookupService::class);
+    $result = $service->geocodeCoordinates([
+        'street' => 'Onbekend',
+        'houseNumber' => '999',
+        'city' => 'Nergens',
+        'country' => 'NLD',
+    ]);
+
+    expect($result)->toBeNull();
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->with('Google Maps coordinate lookup returned no results', Mockery::type('array'));
+});
+
 test('lookup for NLD still uses the existing postcode.tech flow', function () {
     $mockLookup = Mockery::mock(ZipCodeLocationLookup::class);
     $mockLookup->shouldReceive('lookup')

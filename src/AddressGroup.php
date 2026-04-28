@@ -6,7 +6,6 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
-use Filament\Schemas\Components\Component as FilamentComponent;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -33,8 +32,9 @@ class AddressGroup
      * @param  string  $prefix  The form field prefix for nested data (e.g., 'address' for 'address.street')
      * @param  bool  $required  Whether the address fields are required
      * @param  bool  $showCoordinates  Whether to show latitude/longitude as visible fields
+     * @param  bool  $coordinatesRequired  Whether GPS coordinates are required (only effective with $showCoordinates)
      */
-    public static function make(string $prefix = 'address', bool $required = true, bool $showCoordinates = false): Grid
+    public static function make(string $prefix = 'address', bool $required = true, bool $showCoordinates = false, bool $coordinatesRequired = false): Grid
     {
         return Grid::make()
             ->schema([
@@ -59,42 +59,7 @@ class AddressGroup
                     ->maxLength(10)
                     ->extraInputAttributes(['autocomplete' => 'address-line2'])
                     ->live(onBlur: true)
-                    ->afterStateUpdated(fn (Get $get, Set $set) => self::autoLookup($prefix, $get, $set))
-                    ->suffixAction(
-                        Action::make('lookupAddress')
-                            ->icon('chargit-magnifying-glass')
-                            ->tooltip('Zoek adres op basis van postcode en huisnummer')
-                            ->action(function (Get $schemaGet, FilamentComponent $component) use ($prefix) {
-                                $postalCode = $schemaGet($prefix.'.postalCode');
-                                $houseNumber = $schemaGet($prefix.'.houseNumber');
-                                $country = $schemaGet($prefix.'.country') ?? 'NLD';
-
-                                if (! $postalCode || ! $houseNumber) {
-                                    return;
-                                }
-
-                                $result = app(PostcodeLookupService::class)->lookup($postalCode, $houseNumber, $country);
-
-                                if ($result) {
-                                    $livewire = $component->getLivewire();
-                                    /** @phpstan-ignore-next-line */
-                                    $data = $livewire->data;
-                                    data_set($data, $prefix.'.street', $result['street']);
-                                    data_set($data, $prefix.'.city', $result['city']);
-                                    if (isset($result['latitude'])) {
-                                        data_set($data, $prefix.'.latitude', $result['latitude']);
-                                    }
-                                    if (isset($result['longitude'])) {
-                                        data_set($data, $prefix.'.longitude', $result['longitude']);
-                                    }
-                                    if (isset($result['latitude'], $result['longitude'])) {
-                                        data_set($data, $prefix.'.coordinates', $result['latitude'].', '.$result['longitude']);
-                                    }
-                                    /** @phpstan-ignore-next-line */
-                                    $livewire->data = $data;
-                                }
-                            })
-                    ),
+                    ->afterStateUpdated(fn (Get $get, Set $set) => self::autoLookup($prefix, $get, $set)),
                 TextInput::make($prefix.'.addition')
                     ->label('Toevoeging')
                     ->maxLength(10),
@@ -117,7 +82,7 @@ class AddressGroup
                     ->native(false)
                     ->live()
                     ->extraInputAttributes(['autocomplete' => 'country']),
-                ...self::getCoordinateFields($prefix, $showCoordinates),
+                ...self::getCoordinateFields($prefix, $showCoordinates, $coordinatesRequired),
             ])
             ->columns(3)
             ->columnSpanFull();
@@ -128,15 +93,16 @@ class AddressGroup
      *
      * @return array<int, Hidden|TextInput>
      */
-    private static function getCoordinateFields(string $prefix, bool $showCoordinates): array
+    private static function getCoordinateFields(string $prefix, bool $showCoordinates, bool $coordinatesRequired = false): array
     {
         if ($showCoordinates) {
             return [
-                Hidden::make($prefix.'.latitude'),
-                Hidden::make($prefix.'.longitude'),
+                Hidden::make($prefix.'.latitude')->required($coordinatesRequired),
+                Hidden::make($prefix.'.longitude')->required($coordinatesRequired),
                 TextInput::make($prefix.'.coordinates')
                     ->label('GPS-coördinaten')
                     ->placeholder('52.123456, 4.123456')
+                    ->required($coordinatesRequired)
                     ->columnSpan(2)
                     ->dehydrated(false)
                     ->afterStateHydrated(function (TextInput $component, Get $get) use ($prefix) {
@@ -155,9 +121,32 @@ class AddressGroup
                             return;
                         }
                         $parts = array_map('trim', explode(',', $state));
-                        $set($prefix.'.latitude', $parts[0] ?? null);
+                        $set($prefix.'.latitude', $parts[0]);
                         $set($prefix.'.longitude', $parts[1] ?? null);
-                    }),
+                    })
+                    ->suffixAction(
+                        Action::make('fetchCoordinates')
+                            ->icon('heroicon-m-map-pin')
+                            ->tooltip('Haal GPS-coördinaten op uit het adres')
+                            ->action(function (Get $get, Set $set) use ($prefix) {
+                                $result = app(PostcodeLookupService::class)->geocodeCoordinates([
+                                    'street' => $get($prefix.'.street'),
+                                    'houseNumber' => $get($prefix.'.houseNumber'),
+                                    'addition' => $get($prefix.'.addition'),
+                                    'postalCode' => $get($prefix.'.postalCode'),
+                                    'city' => $get($prefix.'.city'),
+                                    'country' => $get($prefix.'.country') ?? 'NLD',
+                                ]);
+
+                                if ($result === null) {
+                                    return;
+                                }
+
+                                $set($prefix.'.latitude', $result['latitude']);
+                                $set($prefix.'.longitude', $result['longitude']);
+                                $set($prefix.'.coordinates', $result['latitude'].', '.$result['longitude']);
+                            })
+                    ),
             ];
         }
 
