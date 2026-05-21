@@ -185,12 +185,6 @@ class AddressGroup
             return;
         }
 
-        // Skip if street is already filled (don't overwrite user input)
-        $street = $get($prefix.'.street');
-        if ($street) {
-            return;
-        }
-
         $result = app(PostcodeLookupService::class)->lookup($postalCode, $houseNumber, $country);
 
         if ($result) {
