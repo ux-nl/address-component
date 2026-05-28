@@ -172,6 +172,13 @@ class AddressGroup
     /**
      * Auto-lookup address when both postalCode and houseNumber are filled.
      * Works for all supported countries.
+     *
+     * Only street and city are filled automatically — GPS coordinates must be
+     * fetched explicitly via the "Haal GPS locatie op" action. For non-existing
+     * postcode/huisnummer combinations the lookup service falls back to a
+     * fuzzy match (Google Maps geocoder) that may return coordinates for a
+     * nearby/approximate location, so auto-filling GPS gives a misleading
+     * impression of accuracy.
      */
     private static function autoLookup(string $prefix, Get $get, Set $set): void
     {
@@ -190,15 +197,6 @@ class AddressGroup
         if ($result) {
             $set($prefix.'.street', $result['street']);
             $set($prefix.'.city', $result['city']);
-            if (isset($result['latitude'])) {
-                $set($prefix.'.latitude', $result['latitude']);
-            }
-            if (isset($result['longitude'])) {
-                $set($prefix.'.longitude', $result['longitude']);
-            }
-            if (isset($result['latitude'], $result['longitude'])) {
-                $set($prefix.'.coordinates', $result['latitude'].', '.$result['longitude']);
-            }
         }
     }
 }
