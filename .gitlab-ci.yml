@@ -32,8 +32,9 @@ cache:
   tags:
     - self-hosted
   before_script:
-    - apt-get update && apt-get install -y git unzip libzip-dev
-    - docker-php-ext-install zip
+    # libicu-dev + ext-intl zijn nodig voor filament/support (^5).
+    - apt-get update && apt-get install -y git unzip libzip-dev libicu-dev
+    - docker-php-ext-install zip intl
     - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
     - composer install --prefer-dist --no-interaction --no-progress
 
