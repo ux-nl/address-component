@@ -67,7 +67,6 @@ class AddressGroup
                     ->label('Straat')
                     ->required($required)
                     ->maxLength(255)
-                    ->columnSpan(2)
                     ->autocomplete('street-address'),
                 TextInput::make($prefix.'.city')
                     ->label('Woonplaats')
