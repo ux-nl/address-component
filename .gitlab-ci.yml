@@ -48,4 +48,6 @@ larastan:
   extends: .php-base
   stage: test
   script:
-    - vendor/bin/phpstan analyse --no-progress
+    # --memory-limit=1G voorkomt dat de parallelle PHPStan-workers in de
+    # container omvallen (exit 255), zelfde aanpak als mijn-installateur-v2.
+    - vendor/bin/phpstan analyse --no-progress --memory-limit=1G
