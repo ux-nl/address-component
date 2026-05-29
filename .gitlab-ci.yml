@@ -1,24 +1,50 @@
 stages:
   - test
 
-tests:
-  stage: test
+# Voorkom dubbele pipelines bij een open MR: alleen de MR-pipeline draait,
+# de branch-pipeline wordt overgeslagen zolang er een MR open staat, en na
+# een merge naar main draait er geen losse pipeline meer.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+variables:
+  COMPOSER_CACHE_DIR: "$CI_PROJECT_DIR/.composer-cache"
+
+# Cache gedeeld over branches; invalideert alleen wanneer composer.lock wijzigt.
+cache:
+  key:
+    files:
+      - composer.lock
+  paths:
+    - .composer-cache/
+    - vendor/
+
+.php-base:
   image: php:8.4-cli
+  # Self-hosted runner i.p.v. de GitLab.com shared runners — die laatste
+  # verbruiken (opgebruikte) compute-minuten waardoor de pipeline faalt.
+  tags:
+    - self-hosted
   before_script:
     - apt-get update && apt-get install -y git unzip libzip-dev
     - docker-php-ext-install zip
     - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
     - composer install --prefer-dist --no-interaction --no-progress
+
+tests:
+  extends: .php-base
+  stage: test
   script:
     - vendor/bin/pest
 
 larastan:
+  extends: .php-base
   stage: test
-  image: php:8.4-cli
-  before_script:
-    - apt-get update && apt-get install -y git unzip libzip-dev
-    - docker-php-ext-install zip
-    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-    - composer install --prefer-dist --no-interaction --no-progress
   script:
     - vendor/bin/phpstan analyse --no-progress
