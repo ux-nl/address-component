@@ -2,6 +2,7 @@
 
 namespace Chargit\AddressComponent;
 
+use Closure;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
@@ -30,11 +31,11 @@ class AddressGroup
      * Create an address form fieldset with postcode lookup functionality.
      *
      * @param  string  $prefix  The form field prefix for nested data (e.g., 'address' for 'address.street')
-     * @param  bool  $required  Whether the address fields are required
+     * @param  bool|Closure  $required  Whether the address fields are required. Accepts a Closure so callers can make the address optional based on form state (e.g. a not-yet-activated user).
      * @param  bool  $showCoordinates  Whether to show latitude/longitude as visible fields
      * @param  bool  $coordinatesRequired  Whether GPS coordinates are required (only effective with $showCoordinates)
      */
-    public static function make(string $prefix = 'address', bool $required = true, bool $showCoordinates = false, bool $coordinatesRequired = false): Grid
+    public static function make(string $prefix = 'address', bool|Closure $required = true, bool $showCoordinates = false, bool $coordinatesRequired = false): Grid
     {
         return Grid::make()
             ->schema([
@@ -43,6 +44,19 @@ class AddressGroup
                     ->required($required)
                     ->maxLength(10)
                     ->autocomplete('postal-code')
+                    // Een Nederlandse postcode moet altijd 4 cijfers + 2 letters
+                    // bevatten (bijv. 1234 AB). Zonder de letters levert de
+                    // postcode-lookup een verkeerde straat op, dus we blokkeren
+                    // het opslaan van een onvolledige postcode.
+                    ->rules([
+                        fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($prefix, $get): void {
+                            $country = $get($prefix.'.country') ?: 'NLD';
+
+                            if ($country === 'NLD' && filled($value) && ! self::isCompleteDutchPostalCode((string) $value)) {
+                                $fail('Vul een geldige postcode in, bijvoorbeeld 1234 AB.');
+                            }
+                        },
+                    ])
                     ->live(onBlur: true)
                     ->afterStateUpdated(function (Get $get, Set $set, ?string $state) use ($prefix) {
                         if (blank($state)) {
@@ -161,6 +175,16 @@ class AddressGroup
     }
 
     /**
+     * Whether the given value is a complete Dutch postal code: four digits
+     * (not starting with 0) followed by two letters, optionally separated by a
+     * space — e.g. "1234AB" or "1234 AB".
+     */
+    public static function isCompleteDutchPostalCode(?string $value): bool
+    {
+        return (bool) preg_match('/^[1-9][0-9]{3}\s?[A-Za-z]{2}$/', trim((string) $value));
+    }
+
+    /**
      * Clear the fields that are populated by the postcode/house-number lookup
      * so a cleared postcode doesn't leave a stale street/city behind.
      */
@@ -193,6 +217,13 @@ class AddressGroup
 
         // Only lookup if both fields are filled
         if (! $postalCode || ! $houseNumber) {
+            return;
+        }
+
+        // Een onvolledige Nederlandse postcode (zonder de 2 letters) zou een
+        // fuzzy match en daarmee een verkeerde straat opleveren; sla de lookup
+        // dan over tot de postcode compleet is.
+        if ($country === 'NLD' && ! self::isCompleteDutchPostalCode((string) $postalCode)) {
             return;
         }
 
