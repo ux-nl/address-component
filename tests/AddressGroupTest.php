@@ -16,6 +16,31 @@ test('grid has three columns layout', function () {
     expect($grid->getColumns())->toMatchArray(['lg' => 3]);
 });
 
+function addressField(string $name)
+{
+    foreach (AddressGroup::make('address')->getDefaultChildComponents() as $component) {
+        if (method_exists($component, 'getName') && $component->getName() === $name) {
+            return $component;
+        }
+    }
+
+    return null;
+}
+
+test('house number only allows digits via a numeric mask', function () {
+    $houseNumber = addressField('address.houseNumber');
+
+    expect($houseNumber)->not->toBeNull()
+        ->and($houseNumber->getMask())->toBe('9999999999');
+});
+
+test('addition field has no numeric mask so letters are allowed', function () {
+    $addition = addressField('address.addition');
+
+    expect($addition)->not->toBeNull()
+        ->and($addition->getMask())->toBeNull();
+});
+
 test('postcode lookup service is called with correct parameters', function () {
     $mockService = Mockery::mock(PostcodeLookupService::class);
     $mockService->shouldReceive('lookup')

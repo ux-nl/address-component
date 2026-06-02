@@ -57,7 +57,12 @@ class AddressGroup
                     ->label('Huisnummer')
                     ->required($required)
                     ->maxLength(10)
-                    ->extraInputAttributes(['autocomplete' => 'address-line2'])
+                    // Alleen cijfers in het huisnummer; letters horen in
+                    // 'Toevoeging'. De mask blokkeert letters al bij het typen,
+                    // de regex-regel vangt plak-/no-JS-invoer server-side af.
+                    ->mask('9999999999')
+                    ->rule('regex:/^[0-9]*$/')
+                    ->extraInputAttributes(['autocomplete' => 'address-line2', 'inputmode' => 'numeric'])
                     ->live(onBlur: true)
                     ->afterStateUpdated(fn (Get $get, Set $set) => self::autoLookup($prefix, $get, $set)),
                 TextInput::make($prefix.'.addition')
