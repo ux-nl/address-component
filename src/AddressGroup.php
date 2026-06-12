@@ -78,7 +78,15 @@ class AddressGroup
                     ->rule('regex:/^[0-9]*$/')
                     ->extraInputAttributes(['autocomplete' => 'address-line2', 'inputmode' => 'numeric'])
                     ->live(onBlur: true)
-                    ->afterStateUpdated(fn (Get $get, Set $set) => self::autoLookup($prefix, $get, $set)),
+                    ->afterStateUpdated(function (Get $get, Set $set, ?string $state) use ($prefix) {
+                        if (blank($state)) {
+                            self::clearCoordinates($prefix, $set);
+
+                            return;
+                        }
+
+                        self::autoLookup($prefix, $get, $set);
+                    }),
                 TextInput::make($prefix.'.addition')
                     ->label('Toevoeging')
                     ->maxLength(10),
@@ -192,21 +200,45 @@ class AddressGroup
     {
         $set($prefix.'.street', null);
         $set($prefix.'.city', null);
+        self::clearCoordinates($prefix, $set);
+    }
+
+    /**
+     * Clear only the GPS coordinates, e.g. when the house number is cleared:
+     * the street and city stay valid, but the precise location does not.
+     */
+    private static function clearCoordinates(string $prefix, Set $set): void
+    {
         $set($prefix.'.latitude', null);
         $set($prefix.'.longitude', null);
         $set($prefix.'.coordinates', null);
     }
 
     /**
+     * Fill the GPS coordinates from a lookup result. Coordinates without a
+     * complete lat/lng pair are cleared instead, so a changed address never
+     * keeps the GPS location of the previous address.
+     */
+    private static function setCoordinates(string $prefix, Set $set, ?string $latitude, ?string $longitude): void
+    {
+        if (blank($latitude) || blank($longitude)) {
+            self::clearCoordinates($prefix, $set);
+
+            return;
+        }
+
+        $set($prefix.'.latitude', $latitude);
+        $set($prefix.'.longitude', $longitude);
+        $set($prefix.'.coordinates', $latitude.', '.$longitude);
+    }
+
+    /**
      * Auto-lookup address when both postalCode and houseNumber are filled.
      * Works for all supported countries.
      *
-     * Only street and city are filled automatically — GPS coordinates must be
-     * fetched explicitly via the "Haal GPS locatie op" action. For non-existing
-     * postcode/huisnummer combinations the lookup service falls back to a
-     * fuzzy match (Google Maps geocoder) that may return coordinates for a
-     * nearby/approximate location, so auto-filling GPS gives a misleading
-     * impression of accuracy.
+     * Street, city and GPS coordinates come from the lookup result. When the
+     * lookup fails (or returns no coordinates) the GPS fields are cleared, so
+     * the coordinates of a previously entered address never linger.
      */
     private static function autoLookup(string $prefix, Get $get, Set $set): void
     {
@@ -229,9 +261,14 @@ class AddressGroup
 
         $result = app(PostcodeLookupService::class)->lookup($postalCode, $houseNumber, $country);
 
-        if ($result) {
-            $set($prefix.'.street', $result['street']);
-            $set($prefix.'.city', $result['city']);
+        if (! $result) {
+            self::clearCoordinates($prefix, $set);
+
+            return;
         }
+
+        $set($prefix.'.street', $result['street']);
+        $set($prefix.'.city', $result['city']);
+        self::setCoordinates($prefix, $set, $result['latitude'] ?? null, $result['longitude'] ?? null);
     }
 }
