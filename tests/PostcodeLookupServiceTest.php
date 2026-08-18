@@ -295,3 +295,92 @@ test('lookup for NLD still uses the existing postcode.tech flow', function () {
         ->and($result['street'])->toBe('Teststraat')
         ->and($result['city'])->toBe('Amsterdam');
 });
+
+// De stille bug: valt de lookup terug op Google en levert die een
+// postcodecentroïde zonder `route`, dan komt de straat als lege string terug.
+// `isset('')` is true, dus die glipte door de guard en maakte het straatveld
+// leeg in plaats van het te vullen — zonder melding en zonder logregel.
+test('lookup returns null when the address comes back without a street or city', function (array $result) {
+    $mockLookup = Mockery::mock(ZipCodeLocationLookup::class);
+    $mockLookup->shouldReceive('lookup')->once()->andReturn($result);
+
+    $service = new PostcodeLookupService($mockLookup);
+
+    expect($service->lookup('4921JN', '20'))->toBeNull();
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->withArgs(fn ($message) => $message === 'Postcode lookup returned no results');
+})->with([
+    'lege straat' => [['street' => '', 'city' => 'Made']],
+    'lege plaats' => [['street' => 'Zilverschoon', 'city' => '']],
+    'beide leeg' => [['street' => '', 'city' => '']],
+    'alleen spaties' => [['street' => '   ', 'city' => 'Made']],
+]);
+
+// Hetzelfde patroon in het buitenlandpad. Dat pad komt niet langs de guard in
+// lookup(), dus het gaf een lege straat ongefilterd terug.
+test('foreign lookup returns null when google returns a centroid without a street', function () {
+    Http::fake([
+        'maps.googleapis.com/maps/api/geocode/*' => Http::response([
+            'status' => 'OK',
+            'results' => [[
+                'geometry' => ['location' => ['lat' => 50.8503, 'lng' => 4.3517]],
+                'address_components' => [
+                    ['types' => ['locality', 'political'], 'long_name' => 'Bruxelles'],
+                    ['types' => ['postal_code'], 'long_name' => '1000'],
+                ],
+            ]],
+        ]),
+    ]);
+
+    expect(app(PostcodeLookupService::class)->lookup('1000', '1', 'BEL'))->toBeNull();
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->with('Google Maps geocoding returned no usable address', Mockery::type('array'));
+});
+
+// Google zet de types in willekeurige volgorde; op alleen `types[0]` lezen liet
+// een `locality` die achteraan stond wegvallen.
+test('foreign lookup reads a component type that is not listed first', function () {
+    Http::fake([
+        'maps.googleapis.com/maps/api/geocode/*' => Http::response([
+            'status' => 'OK',
+            'results' => [[
+                'geometry' => ['location' => ['lat' => 50.8503, 'lng' => 4.3517]],
+                'address_components' => [
+                    ['types' => ['political', 'locality'], 'long_name' => 'Bruxelles'],
+                    ['types' => ['route'], 'long_name' => 'Rue de la Loi'],
+                ],
+            ]],
+        ]),
+    ]);
+
+    $result = app(PostcodeLookupService::class)->lookup('1000', '1', 'BEL');
+
+    expect($result)->not->toBeNull()
+        ->and($result['city'])->toBe('Bruxelles');
+});
+
+// Kleinere kernen leveren geen `locality`, waardoor de plaats leeg bleef en het
+// hele resultaat als onbruikbaar werd weggegooid.
+test('foreign lookup falls back to postal_town for the city', function () {
+    Http::fake([
+        'maps.googleapis.com/maps/api/geocode/*' => Http::response([
+            'status' => 'OK',
+            'results' => [[
+                'geometry' => ['location' => ['lat' => 51.2093, 'lng' => 3.2247]],
+                'address_components' => [
+                    ['types' => ['route'], 'long_name' => 'Markt'],
+                    ['types' => ['postal_town'], 'long_name' => 'Brugge'],
+                ],
+            ]],
+        ]),
+    ]);
+
+    $result = app(PostcodeLookupService::class)->lookup('8000', '1', 'BEL');
+
+    expect($result)->not->toBeNull()
+        ->and($result['city'])->toBe('Brugge');
+});
