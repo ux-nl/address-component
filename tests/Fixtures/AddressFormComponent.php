@@ -17,11 +17,16 @@ class AddressFormComponent extends Component implements HasSchemas
      */
     public ?array $data = [];
 
-    public function mount(): void
+    /**
+     * The country the form is hydrated with. A parameter so tests can open the
+     * form on the values a backend really returns — an empty string, alpha-2 —
+     * instead of only on a well-formed alpha-3 code.
+     */
+    public function mount(string $initialCountry = 'NLD'): void
     {
         $this->form->fill([
             'address' => [
-                'country' => 'NLD',
+                'country' => $initialCountry,
             ],
         ]);
     }

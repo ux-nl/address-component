@@ -88,3 +88,37 @@ test('postcode lookup service is called with correct parameters', function () {
         ->and($result['street'])->toBe('Teststraat')
         ->and($result['city'])->toBe('Amsterdam');
 });
+
+test('normalizeCountry keeps a supported alpha-3 code', function (string $code) {
+    expect(AddressGroup::normalizeCountry($code))->toBe($code);
+})->with(['NLD', 'BEL', 'DEU', 'FRA', 'LUX']);
+
+test('normalizeCountry maps alpha-2 onto alpha-3', function (string $alpha2, string $alpha3) {
+    expect(AddressGroup::normalizeCountry($alpha2))->toBe($alpha3);
+})->with([
+    ['NL', 'NLD'],
+    ['BE', 'BEL'],
+    ['DE', 'DEU'],
+    ['FR', 'FRA'],
+    ['LU', 'LUX'],
+]);
+
+// De lege string is de waarde die een backend teruggeeft voor "geen land". Een
+// `?? 'NLD'` laat hem staan, waarna de Select geen optie vindt en leeg rendert
+// en de lookup het buitenlandpad in gaat.
+test('normalizeCountry falls back to NLD for an empty country', function (mixed $value) {
+    expect(AddressGroup::normalizeCountry($value))->toBe('NLD');
+})->with([null, '', '   ']);
+
+test('normalizeCountry falls back to NLD for a country the select cannot render', function (mixed $value) {
+    expect(AddressGroup::normalizeCountry($value))->toBe('NLD');
+})->with(['Netherlands', 'Nederland', 'XX', 'ESP', 0]);
+
+test('normalizeCountry ignores case and surrounding whitespace', function () {
+    expect(AddressGroup::normalizeCountry(' nl '))->toBe('NLD')
+        ->and(AddressGroup::normalizeCountry('bel'))->toBe('BEL');
+});
+
+test('normalizeCountry never returns a code that is missing from the select', function (mixed $value) {
+    expect(AddressGroup::COUNTRIES)->toHaveKey(AddressGroup::normalizeCountry($value));
+})->with([null, '', 'NL', 'NLD', 'BE', 'XX', 'Netherlands', 0]);

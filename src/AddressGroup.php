@@ -28,6 +28,39 @@ class AddressGroup
     ];
 
     /**
+     * ISO 3166-1 alpha-2 to alpha-3, limited to the countries above.
+     */
+    private const ALPHA2_TO_ALPHA3 = [
+        'NL' => 'NLD',
+        'BE' => 'BEL',
+        'DE' => 'DEU',
+        'FR' => 'FRA',
+        'LU' => 'LUX',
+    ];
+
+    /**
+     * Normalise a country into one of the alpha-3 codes the country Select can
+     * actually render, falling back to the Netherlands.
+     *
+     * Callers hydrate this form from all kinds of backends, and not every one
+     * of them returns alpha-3. A value that has no matching option renders as
+     * an empty field and then trips the required rule on save, and any country
+     * other than NLD sends the lookup down the foreign geocoding path where a
+     * Dutch address is never found.
+     *
+     * The empty string is the case worth naming: it is what an API returns for
+     * "no country", `?? 'NLD'` does not catch it, and it survives `isset()`.
+     */
+    public static function normalizeCountry(mixed $value): string
+    {
+        $code = strtoupper(trim((string) $value));
+
+        $code = self::ALPHA2_TO_ALPHA3[$code] ?? $code;
+
+        return isset(self::COUNTRIES[$code]) ? $code : 'NLD';
+    }
+
+    /**
      * Create an address form fieldset with postcode lookup functionality.
      *
      * @param  string  $prefix  The form field prefix for nested data (e.g., 'address' for 'address.street')
@@ -50,7 +83,7 @@ class AddressGroup
                     // het opslaan van een onvolledige postcode.
                     ->rules([
                         fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($prefix, $get): void {
-                            $country = $get($prefix.'.country') ?: 'NLD';
+                            $country = self::normalizeCountry($get($prefix.'.country'));
 
                             if ($country === 'NLD' && filled($value) && ! self::isCompleteDutchPostalCode((string) $value)) {
                                 $fail('Vul een geldige postcode in, bijvoorbeeld 1234 AB.');
@@ -107,6 +140,12 @@ class AddressGroup
                     ->required($required)
                     ->native(false)
                     ->live()
+                    // Een waarde zonder bijpassende optie (lege string, alpha-2)
+                    // rendert als een leeg veld, en `default()` grijpt niet in
+                    // omdat het formulier met een expliciete waarde is gevuld.
+                    // Normaliseren bij het hydrateren, zodat het formulier nooit
+                    // opent met een land dat de Select niet kan tonen.
+                    ->afterStateHydrated(fn (Select $component, mixed $state) => $component->state(self::normalizeCountry($state)))
                     ->extraInputAttributes(['autocomplete' => 'country']),
                 ...self::getCoordinateFields($prefix, $showCoordinates, $coordinatesRequired),
             ])
@@ -161,7 +200,7 @@ class AddressGroup
                                     'addition' => $get($prefix.'.addition'),
                                     'postalCode' => $get($prefix.'.postalCode'),
                                     'city' => $get($prefix.'.city'),
-                                    'country' => $get($prefix.'.country') ?? 'NLD',
+                                    'country' => self::normalizeCountry($get($prefix.'.country')),
                                 ]);
 
                                 if ($result === null) {
@@ -242,7 +281,7 @@ class AddressGroup
      */
     private static function autoLookup(string $prefix, Get $get, Set $set): void
     {
-        $country = $get($prefix.'.country') ?? 'NLD';
+        $country = self::normalizeCountry($get($prefix.'.country'));
 
         $postalCode = $get($prefix.'.postalCode');
         $houseNumber = $get($prefix.'.houseNumber');
