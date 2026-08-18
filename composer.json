@@ -41,6 +41,12 @@
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "git@github.com:ux-nl/zip-code-location-lookup.git"
+        }
+    ],
     "config": {
         "allow-plugins": {
             "pestphp/pest-plugin": true
