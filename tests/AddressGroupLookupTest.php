@@ -117,3 +117,33 @@ test('a lookup without coordinates clears the stale GPS coordinates', function (
         ->assertSet('data.address.longitude', null)
         ->assertSet('data.address.coordinates', null);
 });
+
+// Regressie: een backend die "geen land" als lege string teruggeeft liet het
+// veld leeg renderen, omdat de Select geen optie heeft die daarop matcht en
+// `default('NLD')` niet ingrijpt op een gevuld formulier.
+test('the country field opens on a code the select can render', function (string $initialCountry, string $expected) {
+    Livewire::test(AddressFormComponent::class, ['initialCountry' => $initialCountry])
+        ->assertSet('data.address.country', $expected);
+})->with([
+    'lege string' => ['', 'NLD'],
+    'alpha-2' => ['NL', 'NLD'],
+    'onbekend' => ['Netherlands', 'NLD'],
+    'geldig' => ['BEL', 'BEL'],
+]);
+
+// Dezelfde lege string stuurde de lookup het buitenlandpad in, waar een
+// Nederlands adres nooit gevonden wordt.
+test('a country the select cannot render still looks up as a Dutch address', function (string $initialCountry) {
+    $mock = Mockery::mock(PostcodeLookupService::class);
+    $mock->shouldReceive('lookup')
+        ->with('1234AB', '42', 'NLD')
+        ->andReturn(lookupResult('Teststraat', 'Amsterdam', '52.123456', '4.123456'));
+
+    app()->instance(PostcodeLookupService::class, $mock);
+
+    Livewire::test(AddressFormComponent::class, ['initialCountry' => $initialCountry])
+        ->set('data.address.postalCode', '1234AB')
+        ->set('data.address.houseNumber', '42')
+        ->assertSet('data.address.street', 'Teststraat')
+        ->assertSet('data.address.city', 'Amsterdam');
+})->with(['', 'NL', 'Netherlands']);

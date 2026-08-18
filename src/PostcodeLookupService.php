@@ -50,7 +50,11 @@ class PostcodeLookupService
         try {
             $result = $this->lookup->lookup(zipCode: $cleanPostcode, number: $houseNumberInt);
 
-            if (empty($result) || ! isset($result['street'], $result['city'])) {
+            // Niet `isset()`: het Google-fallbackpad in ZipCodeLocationLookup
+            // levert bij een postcodecentroïde zonder `route` een lege straat
+            // op, en `isset('')` is true. Die kwam er ongezien doorheen en
+            // maakte het straatveld leeg in plaats van het te vullen.
+            if (blank($result['street'] ?? null) || blank($result['city'] ?? null)) {
                 $this->sendNotFoundNotification();
 
                 Log::warning('Postcode lookup returned no results', [
@@ -229,6 +233,22 @@ class PostcodeLookupService
             $components = $this->parseAddressComponents($result['address_components'] ?? []);
             $location = $result['geometry']['location'] ?? [];
 
+            // Een buitenlandse postcode zonder herkend huisnummer levert net als
+            // in Nederland een centroïde zonder straat. Dit pad komt niet langs
+            // de guard in lookup(), dus hier zelf afvangen: beter het bestaande
+            // adres laten staan dan het leegmaken.
+            if ($components['street'] === '' || $components['city'] === '') {
+                $this->sendNotFoundNotification();
+
+                Log::warning('Google Maps geocoding returned no usable address', [
+                    'postalCode' => $postalCode,
+                    'houseNumber' => $houseNumber,
+                    'country' => $country,
+                ]);
+
+                return null;
+            }
+
             return [
                 'street' => $components['street'],
                 'city' => $components['city'],
@@ -259,20 +279,23 @@ class PostcodeLookupService
      */
     private function parseAddressComponents(array $components): array
     {
-        $street = '';
-        $city = '';
+        $values = [];
 
+        // Elk component draagt een lijst types en de volgorde ligt niet vast,
+        // dus scan ze allemaal in plaats van alleen `types[0]`: een `locality`
+        // komt binnen als ["political", "locality"] en viel zo weg.
         foreach ($components as $component) {
-            $type = $component['types'][0] ?? '';
-
-            if ($type === 'route') {
-                $street = $component['long_name'];
-            } elseif ($type === 'locality') {
-                $city = $component['long_name'];
+            foreach ((array) ($component['types'] ?? []) as $type) {
+                $values[$type] ??= (string) ($component['long_name'] ?? '');
             }
         }
 
-        return ['street' => $street, 'city' => $city];
+        return [
+            'street' => $values['route'] ?? '',
+            // Grotere steden leveren `locality`; kleinere kernen soms alleen een
+            // `postal_town` of de gemeente.
+            'city' => $values['locality'] ?? ($values['postal_town'] ?? ($values['administrative_area_level_2'] ?? '')),
+        ];
     }
 
     /**
