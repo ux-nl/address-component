@@ -3,13 +3,16 @@
 namespace Chargit\AddressComponent\Tests\Fixtures;
 
 use Chargit\AddressComponent\AddressGroup;
+use Filament\Actions\Concerns\InteractsWithActions;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
 use Livewire\Component;
 
-class AddressFormComponent extends Component implements HasSchemas
+class AddressFormComponent extends Component implements HasActions, HasSchemas
 {
+    use InteractsWithActions;
     use InteractsWithSchemas;
 
     /**

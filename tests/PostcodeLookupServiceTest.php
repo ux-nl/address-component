@@ -214,7 +214,7 @@ test('lookup returns null when google maps returns no results for foreign addres
         ->with('Google Maps geocoding returned no results', Mockery::type('array'));
 });
 
-test('geocodeCoordinates returns lat/lng from full address', function () {
+test('geocodeCoordinates geocodes the full address when the postcode is incomplete', function () {
     Http::fake([
         'maps.googleapis.com/maps/api/geocode/*' => Http::response([
             'status' => 'OK',
@@ -228,7 +228,7 @@ test('geocodeCoordinates returns lat/lng from full address', function () {
     $result = $service->geocodeCoordinates([
         'street' => 'Damrak',
         'houseNumber' => '1',
-        'postalCode' => '1012LG',
+        'postalCode' => '1012',
         'city' => 'Amsterdam',
         'country' => 'NLD',
     ]);
@@ -384,3 +384,138 @@ test('foreign lookup falls back to postal_town for the city', function () {
     expect($result)->not->toBeNull()
         ->and($result['city'])->toBe('Brugge');
 });
+
+// Regressie: de knop geocodeerde het adres als vrije tekst en gaf daarmee een
+// andere GPS locatie dan het automatisch invullen, dat het adresregister
+// gebruikt. Voor hetzelfde adres moeten beide hetzelfde antwoord geven.
+test('geocodeCoordinates resolves a Dutch address through the same source as the automatic lookup', function () {
+    Http::fake([
+        'postcode.tech/*' => Http::response([
+            'postcode' => '4921JN',
+            'number' => 20,
+            'street' => 'Zilverschoon',
+            'city' => 'Made',
+            'municipality' => 'Drimmelen',
+            'province' => 'Noord-Brabant',
+            'geo' => ['lat' => 51.6775, 'lon' => 4.7817],
+        ]),
+        // Google geeft voor dit adres 51.6774583, 4.7817044 — ruim naast het
+        // punt uit het register. De knop mag daar niet meer langs.
+        'maps.googleapis.com/*' => Http::response([
+            'status' => 'OK',
+            'results' => [[
+                'formatted_address' => 'Zilverschoon 20, 4921 JN Made, Netherlands',
+                'geometry' => ['location' => ['lat' => 51.6774583, 'lng' => 4.7817044]],
+                'address_components' => [],
+            ]],
+        ]),
+    ]);
+
+    $service = app(PostcodeLookupService::class);
+
+    $automatic = $service->lookup('4921 JN', '20', 'NLD');
+    $button = $service->geocodeCoordinates([
+        'street' => 'Zilverschoon',
+        'houseNumber' => '20',
+        'postalCode' => '4921 JN',
+        'city' => 'Made',
+        'country' => 'NLD',
+    ]);
+
+    expect($button)->toBe([
+        'latitude' => $automatic['latitude'],
+        'longitude' => $automatic['longitude'],
+    ])
+        ->and($button['latitude'])->toBe('51.6775')
+        ->and($button['longitude'])->toBe('4.7817');
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'maps.googleapis.com'));
+});
+
+test('geocodeCoordinates returns null when the postcode lookup does not know the address', function () {
+    Http::fake([
+        'postcode.tech/*' => Http::response(['message' => 'No result for this combination.'], 404),
+        'maps.googleapis.com/*' => Http::response([
+            'status' => 'OK',
+            'results' => [[
+                'geometry' => ['location' => ['lat' => 52.3676, 'lng' => 4.9041]],
+                'address_components' => [],
+            ]],
+        ]),
+    ]);
+
+    $service = app(PostcodeLookupService::class);
+
+    // Het adres bestaat niet in het register en het Google-fallbackpad in de
+    // lookup levert geen straat, dus de knop hoort niets te vullen in plaats
+    // van een coördinaat van een ander pand.
+    expect($service->geocodeCoordinates([
+        'street' => 'Onbekend',
+        'houseNumber' => '999',
+        'postalCode' => '9999ZZ',
+        'city' => 'Nergens',
+        'country' => 'NLD',
+    ]))->toBeNull();
+});
+
+test('geocodeCoordinates returns null when the postcode lookup finds an address without coordinates', function () {
+    $mockLookup = Mockery::mock(ZipCodeLocationLookup::class);
+    $mockLookup->shouldReceive('lookup')
+        ->once()
+        ->with('1234AB', 1)
+        ->andReturn(['street' => 'Teststraat', 'city' => 'Amsterdam']);
+
+    $service = new PostcodeLookupService($mockLookup);
+
+    expect($service->geocodeCoordinates([
+        'street' => 'Teststraat',
+        'houseNumber' => '1',
+        'postalCode' => '1234AB',
+        'city' => 'Amsterdam',
+        'country' => 'NLD',
+    ]))->toBeNull();
+
+    Log::shouldHaveReceived('warning')
+        ->once()
+        ->with('Postcode lookup returned an address without coordinates', Mockery::type('array'));
+});
+
+test('geocodeCoordinates geocodes the full address when the postcode lookup cannot be used', function (array $address) {
+    Http::fake([
+        'maps.googleapis.com/maps/api/geocode/*' => Http::response([
+            'status' => 'OK',
+            'results' => [[
+                'geometry' => ['location' => ['lat' => 50.8503, 'lng' => 4.3517]],
+                'address_components' => [],
+            ]],
+        ]),
+    ]);
+
+    $result = app(PostcodeLookupService::class)->geocodeCoordinates($address);
+
+    expect($result['latitude'])->toBe('50.8503');
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'postcode.tech'));
+})->with([
+    // Buitenland heeft geen register, dus de vrije-tekstquery met straat en
+    // woonplaats is daar het beste dat er is.
+    'buitenland' => [[
+        'street' => 'Grote Markt',
+        'houseNumber' => '1',
+        'postalCode' => '1000',
+        'city' => 'Brussel',
+        'country' => 'BEL',
+    ]],
+    'geen huisnummer' => [[
+        'street' => 'Grote Markt',
+        'postalCode' => '1012AB',
+        'city' => 'Amsterdam',
+        'country' => 'NLD',
+    ]],
+    'geen postcode' => [[
+        'street' => 'Grote Markt',
+        'houseNumber' => '1',
+        'city' => 'Amsterdam',
+        'country' => 'NLD',
+    ]],
+]);

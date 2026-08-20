@@ -222,13 +222,16 @@ class AddressGroup
     }
 
     /**
-     * Whether the given value is a complete Dutch postal code: four digits
-     * (not starting with 0) followed by two letters, optionally separated by a
-     * space — e.g. "1234AB" or "1234 AB".
+     * Whether the given value is a complete Dutch postal code.
+     *
+     * Delegates to the lookup service, which decides on the same rule whether
+     * it can resolve an address: the postcode rule on the field, the automatic
+     * lookup and the "fetch coordinates" button must not disagree about what
+     * counts as a complete postcode.
      */
     public static function isCompleteDutchPostalCode(?string $value): bool
     {
-        return (bool) preg_match('/^[1-9][0-9]{3}\s?[A-Za-z]{2}$/', trim((string) $value));
+        return PostcodeLookupService::isCompleteDutchPostalCode($value);
     }
 
     /**
