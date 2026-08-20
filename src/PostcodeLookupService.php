@@ -89,15 +89,24 @@ class PostcodeLookupService
     }
 
     /**
-     * Geocode coordinates from a (partial) address using Google Maps Geocoding API.
-     * Used by the "fetch coordinates from address" action — accepts whatever fields
-     * are currently filled in and returns the best matching latitude/longitude.
+     * Resolve the coordinates of an address for the "fetch coordinates from
+     * address" action.
+     *
+     * A Dutch postcode and house number go through the same lookup() the
+     * automatic lookup uses, so the button can never contradict what typing
+     * the address already filled in. Only when that lookup cannot answer — a
+     * half-typed postcode, a missing house number, a foreign address — does
+     * this fall back to geocoding whatever fields are filled in as free text.
      *
      * @param  array{street?: ?string, houseNumber?: ?string, addition?: ?string, postalCode?: ?string, city?: ?string, country?: ?string}  $address
      * @return array{latitude: string, longitude: string}|null
      */
     public function geocodeCoordinates(array $address): ?array
     {
+        if ($this->isResolvableByPostcode($address)) {
+            return $this->coordinatesFromLookup($address);
+        }
+
         $apiKey = config('address-component.google_api_key');
 
         if (empty($apiKey)) {
@@ -172,6 +181,83 @@ class PostcodeLookupService
 
             return null;
         }
+    }
+
+    /**
+     * Whether the given value is a complete Dutch postal code: four digits
+     * (not starting with 0) followed by two letters, optionally separated by a
+     * space — e.g. "1234AB" or "1234 AB".
+     */
+    public static function isCompleteDutchPostalCode(?string $value): bool
+    {
+        return (bool) preg_match('/^[1-9][0-9]{3}\s?[A-Za-z]{2}$/', trim((string) $value));
+    }
+
+    /**
+     * Whether lookup() can answer for this address, which for a Dutch one is
+     * the authoritative source: the register returns the coordinates of that
+     * specific building, while geocoding the same address as free text returns
+     * Google's closest match — up to a hundred metres away, and sometimes the
+     * neighbouring house under a different postcode.
+     *
+     * Outside the Netherlands there is no register to consult and both routes
+     * end up at Google anyway, so the free-text query wins there: it carries
+     * the street and city the user typed instead of a bare postcode.
+     *
+     * @param  array{street?: ?string, houseNumber?: ?string, addition?: ?string, postalCode?: ?string, city?: ?string, country?: ?string}  $address
+     */
+    private function isResolvableByPostcode(array $address): bool
+    {
+        if (blank($address['postalCode'] ?? null) || blank($address['houseNumber'] ?? null)) {
+            return false;
+        }
+
+        if (($address['country'] ?? 'NLD') !== 'NLD') {
+            return false;
+        }
+
+        // An incomplete postcode would make the register fuzzy-match and land
+        // on a different street, exactly as it would during the automatic
+        // lookup, which skips it for the same reason.
+        return self::isCompleteDutchPostalCode((string) $address['postalCode']);
+    }
+
+    /**
+     * Resolve coordinates through the postcode lookup. Returns null when the
+     * address is unknown — lookup() has reported why by then — and when it is
+     * known but carries no coordinates.
+     *
+     * @param  array{street?: ?string, houseNumber?: ?string, addition?: ?string, postalCode?: ?string, city?: ?string, country?: ?string}  $address
+     * @return array{latitude: string, longitude: string}|null
+     */
+    private function coordinatesFromLookup(array $address): ?array
+    {
+        $result = $this->lookup(
+            (string) $address['postalCode'],
+            (string) $address['houseNumber'],
+            $address['country'] ?? 'NLD',
+        );
+
+        if ($result === null) {
+            return null;
+        }
+
+        if (blank($result['latitude']) || blank($result['longitude'])) {
+            $this->sendNotFoundNotification();
+
+            Log::warning('Postcode lookup returned an address without coordinates', [
+                'postalCode' => $address['postalCode'],
+                'houseNumber' => $address['houseNumber'],
+                'country' => $address['country'] ?? 'NLD',
+            ]);
+
+            return null;
+        }
+
+        return [
+            'latitude' => $result['latitude'],
+            'longitude' => $result['longitude'],
+        ];
     }
 
     /**

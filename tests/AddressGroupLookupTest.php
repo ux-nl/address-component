@@ -2,6 +2,8 @@
 
 use Chargit\AddressComponent\PostcodeLookupService;
 use Chargit\AddressComponent\Tests\Fixtures\AddressFormComponent;
+use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
 function mockLookup(array|null ...$results): void
@@ -147,3 +149,38 @@ test('a country the select cannot render still looks up as a Dutch address', fun
         ->assertSet('data.address.street', 'Teststraat')
         ->assertSet('data.address.city', 'Amsterdam');
 })->with(['', 'NL', 'Netherlands']);
+
+// Regressie: de GPS-knop geocodeerde het adres als vrije tekst bij Google,
+// terwijl het automatisch invullen het adresregister gebruikt. Voor hetzelfde
+// adres leverde dat twee verschillende locaties op — voor Dam 1 in Amsterdam
+// ruim honderd meter uit elkaar.
+test('the GPS button returns the same location the automatic lookup filled in', function () {
+    Http::fake([
+        'postcode.tech/*' => Http::response([
+            'postcode' => '4921JN',
+            'number' => 20,
+            'street' => 'Zilverschoon',
+            'city' => 'Made',
+            'geo' => ['lat' => 51.6775, 'lon' => 4.7817],
+        ]),
+        'maps.googleapis.com/*' => Http::response([
+            'status' => 'OK',
+            'results' => [[
+                'formatted_address' => 'Zilverschoon 20, 4921 JN Made, Netherlands',
+                'geometry' => ['location' => ['lat' => 51.6774583, 'lng' => 4.7817044]],
+                'address_components' => [],
+            ]],
+        ]),
+    ]);
+
+    Livewire::test(AddressFormComponent::class)
+        ->set('data.address.postalCode', '4921JN')
+        ->set('data.address.houseNumber', '20')
+        ->assertSet('data.address.coordinates', '51.6775, 4.7817')
+        ->set('data.address.coordinates', '')
+        ->assertSet('data.address.latitude', null)
+        ->callAction(TestAction::make('fetchCoordinates')->schemaComponent('address.coordinates'))
+        ->assertSet('data.address.latitude', '51.6775')
+        ->assertSet('data.address.longitude', '4.7817')
+        ->assertSet('data.address.coordinates', '51.6775, 4.7817');
+});
