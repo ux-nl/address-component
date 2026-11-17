@@ -137,8 +137,10 @@ test('the country field opens on a code the select can render', function (string
 // Nederlands adres nooit gevonden wordt.
 test('a country the select cannot render still looks up as a Dutch address', function (string $initialCountry) {
     $mock = Mockery::mock(PostcodeLookupService::class);
+    // Het veld zet een Nederlandse postcode als '1234 AB'; zo gaat hij ook
+    // naar de lookup, die de spatie zelf weer weghaalt.
     $mock->shouldReceive('lookup')
-        ->with('1234AB', '42', 'NLD')
+        ->with('1234 AB', '42', 'NLD')
         ->andReturn(lookupResult('Teststraat', 'Amsterdam', '52.123456', '4.123456'));
 
     app()->instance(PostcodeLookupService::class, $mock);
@@ -183,4 +185,61 @@ test('the GPS button returns the same location the automatic lookup filled in', 
         ->assertSet('data.address.latitude', '51.6775')
         ->assertSet('data.address.longitude', '4.7817')
         ->assertSet('data.address.coordinates', '51.6775, 4.7817');
+});
+
+test('a pasted postcode is cleaned up in the field and still looked up', function () {
+    $mock = Mockery::mock(PostcodeLookupService::class);
+    $mock->shouldReceive('lookup')
+        ->once()
+        ->with('1234 AB', '42', 'NLD')
+        ->andReturn(lookupResult('Teststraat', 'Amsterdam', '52.123456', '4.123456'));
+    app()->instance(PostcodeLookupService::class, $mock);
+
+    Livewire::test(AddressFormComponent::class)
+        ->set('data.address.houseNumber', '42')
+        ->set('data.address.postalCode', "1234\u{00A0}ab")
+        ->assertSet('data.address.postalCode', '1234 AB')
+        ->assertSet('data.address.street', 'Teststraat');
+});
+
+test('a pasted postcode passes validation and is saved cleaned up', function (string $value) {
+    mockLookup(null);
+
+    // fillForm() slaat de updated-hooks over, zoals ook een formulier dat
+    // zonder blur wordt verstuurd: de validatie en het opslaan moeten de
+    // waarde dan zelf opschonen.
+    Livewire::test(AddressFormComponent::class)
+        ->fillForm(['address' => ['postalCode' => $value, 'country' => 'NLD']])
+        ->call('save')
+        ->assertHasNoFormErrors()
+        ->assertSet('saved.address.postalCode', '1234 AB');
+})->with([
+    'non-breaking space' => "1234\u{00A0}AB",
+    'hyphen' => '1234-AB',
+    'zero-width space' => "\u{200B}1234AB",
+]);
+
+test('an incomplete Dutch postcode is still rejected after cleaning it up', function () {
+    mockLookup(null);
+
+    Livewire::test(AddressFormComponent::class)
+        ->fillForm(['address' => ['postalCode' => "1234\u{00A0}A", 'country' => 'NLD']])
+        ->call('save')
+        ->assertHasFormErrors(['address.postalCode']);
+});
+
+test('a foreign postcode keeps its own format', function () {
+    mockLookup(null);
+
+    Livewire::test(AddressFormComponent::class)
+        ->fillForm(['address' => ['postalCode' => "SW1A\u{00A0}1AA", 'country' => 'FRA']])
+        ->call('save')
+        ->assertHasNoFormErrors()
+        ->assertSet('saved.address.postalCode', 'SW1A 1AA');
+});
+
+test('a prefilled postcode opens in the same format it is saved in', function () {
+    Livewire::test(AddressFormComponent::class)
+        ->fillForm(['address' => ['postalCode' => '9423pe', 'country' => 'NLD']])
+        ->assertSet('data.address.postalCode', '9423 PE');
 });

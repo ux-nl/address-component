@@ -43,6 +43,19 @@ class AddressFormComponent extends Component implements HasActions, HasSchemas
             ->statePath('data');
     }
 
+    /**
+     * The dehydrated form state of the last save(), so tests can check what a
+     * caller would store.
+     *
+     * @var array<string, mixed>|null
+     */
+    public ?array $saved = null;
+
+    public function save(): void
+    {
+        $this->saved = $this->form->getState();
+    }
+
     public function render(): string
     {
         return '<div>{{ $this->form }}</div>';
