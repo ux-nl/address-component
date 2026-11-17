@@ -62,7 +62,18 @@ test('postcode field is optional when required is false', function () {
 
 test('a complete Dutch postal code is accepted', function (string $value) {
     expect(AddressGroup::isCompleteDutchPostalCode($value))->toBeTrue();
-})->with(['1234AB', '1234 ab', '5691 GD', '9999ZZ']);
+})->with([
+    '1234AB',
+    '1234 ab',
+    '5691 GD',
+    '9999ZZ',
+    'non-breaking space' => "1234\u{00A0}AB",
+    'narrow no-break space' => "1234\u{202F}AB",
+    'zero-width space in front' => "\u{200B}1234AB",
+    'double space' => '1234  AB',
+    'hyphen' => '1234-AB',
+    'surrounding spaces' => ' 1234 AB ',
+]);
 
 test('an incomplete Dutch postal code is rejected', function (?string $value) {
     expect(AddressGroup::isCompleteDutchPostalCode($value))->toBeFalse();

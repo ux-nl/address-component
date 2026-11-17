@@ -519,3 +519,37 @@ test('geocodeCoordinates geocodes the full address when the postcode lookup cann
         'country' => 'NLD',
     ]],
 ]);
+
+test('normalizePostalCode writes a Dutch postcode as 1234 AB however it was entered', function (string $value) {
+    expect(PostcodeLookupService::normalizePostalCode($value))->toBe('1234 AB');
+})->with([
+    'no space' => '1234AB',
+    'lowercase' => '1234 ab',
+    'non-breaking space' => "1234\u{00A0}AB",
+    'zero-width space and BOM' => "\u{FEFF}1234\u{200B}AB",
+    'double space and padding' => ' 1234  AB ',
+    'hyphen' => '1234-ab',
+]);
+
+test('normalizePostalCode only tidies whitespace in anything that is not a Dutch postcode', function (?string $value, string $country, ?string $expected) {
+    expect(PostcodeLookupService::normalizePostalCode($value, $country))->toBe($expected);
+})->with([
+    'incomplete Dutch postcode' => ["1234\u{00A0}", 'NLD', '1234'],
+    'Belgian postcode' => [' 1000 ', 'BEL', '1000'],
+    'German postcode that looks Dutch' => ['1234AB', 'DEU', '1234AB'],
+    'spacing kept outside the Netherlands' => ["SW1A\u{00A0}\u{00A0}1AA", 'FRA', 'SW1A 1AA'],
+    'hyphen kept outside the Netherlands' => ['L-1234', 'LUX', 'L-1234'],
+    'null' => [null, 'NLD', null],
+]);
+
+test('lookup finds a Dutch address for a postcode pasted with a non-breaking space', function () {
+    $mockLookup = Mockery::mock(ZipCodeLocationLookup::class);
+    $mockLookup->shouldReceive('lookup')
+        ->once()
+        ->with('1234AB', 42)
+        ->andReturn(['street' => 'Teststraat', 'city' => 'Amsterdam', 'lat' => 52.1, 'lng' => 4.1]);
+
+    $result = (new PostcodeLookupService($mockLookup))->lookup("1234\u{00A0}ab", '42');
+
+    expect($result['street'])->toBe('Teststraat');
+});

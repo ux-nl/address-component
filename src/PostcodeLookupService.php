@@ -41,10 +41,10 @@ class PostcodeLookupService
     public function lookup(string $postalCode, string $houseNumber, string $country = 'NLD'): ?array
     {
         if ($country !== 'NLD') {
-            return $this->geocode($postalCode, $houseNumber, $country);
+            return $this->geocode((string) self::normalizePostalCode($postalCode, $country), $houseNumber, $country);
         }
 
-        $cleanPostcode = str_replace(' ', '', strtoupper($postalCode));
+        $cleanPostcode = str_replace(' ', '', strtoupper((string) self::normalizePostalCode($postalCode)));
         $houseNumberInt = (int) $houseNumber;
 
         try {
@@ -185,12 +185,49 @@ class PostcodeLookupService
 
     /**
      * Whether the given value is a complete Dutch postal code: four digits
-     * (not starting with 0) followed by two letters, optionally separated by a
-     * space — e.g. "1234AB" or "1234 AB".
+     * (not starting with 0) followed by two letters — e.g. "1234AB" or
+     * "1234 AB". Judged on the normalised value, so a postcode pasted with a
+     * non-breaking space, a hyphen or a double space counts as complete too.
      */
     public static function isCompleteDutchPostalCode(?string $value): bool
     {
-        return (bool) preg_match('/^[1-9][0-9]{3}\s?[A-Za-z]{2}$/', trim((string) $value));
+        return (bool) preg_match('/^[1-9][0-9]{3} [A-Z]{2}$/', (string) self::normalizePostalCode($value));
+    }
+
+    /**
+     * Normalise a postcode the way a customer meant it.
+     *
+     * Text pasted from a website, mail signature, Word or PDF often carries
+     * characters nobody can see: a non-breaking space (U+00A0, also typed with
+     * ⌥+Space on a Mac) between the digits and the letters, or a zero-width
+     * space (U+200B) or BOM (U+FEFF) in front. `\s` and `trim()` do not catch
+     * those, so a postcode that looks valid on screen was rejected.
+     *
+     * Every kind of whitespace becomes a single regular space and invisible
+     * characters are dropped. A Dutch postcode, however it was written
+     * ("1234ab", "1234-AB", "1234  AB"), becomes "1234 AB". Any other value
+     * keeps its own spacing and hyphens, so a foreign postcode such as
+     * "SW1A 1AA" or "00-950" stays intact.
+     *
+     * @param  string  $country  ISO 3166-1 alpha-3 country code (default: NLD)
+     */
+    public static function normalizePostalCode(?string $value, string $country = 'NLD'): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $tidy = trim((string) preg_replace(
+            ['/[\x{200B}-\x{200D}\x{2060}\x{FEFF}]/u', '/[\p{Z}\s]+/u'],
+            ['', ' '],
+            $value,
+        ));
+
+        if ($country === 'NLD' && preg_match('/^([1-9][0-9]{3})[ \-]*([A-Za-z]{2})$/', $tidy, $matches) === 1) {
+            return $matches[1].' '.strtoupper($matches[2]);
+        }
+
+        return $tidy;
     }
 
     /**

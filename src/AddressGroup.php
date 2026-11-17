@@ -90,12 +90,25 @@ class AddressGroup
                             }
                         },
                     ])
+                    // Een geplakte postcode bevat vaak een harde spatie of een
+                    // onzichtbaar teken; zie PostcodeLookupService::normalizePostalCode().
+                    // Valideer en bewaar de opgeschoonde waarde, en toon die ook
+                    // in het veld, zodat de klant ziet wat er opgeslagen wordt.
+                    ->afterStateHydrated(fn (TextInput $component, Get $get, ?string $state) => $component->state(self::normalizePostalCodeFor($prefix, $get, $state)))
+                    ->mutateStateForValidationUsing(fn (Get $get, ?string $state): ?string => self::normalizePostalCodeFor($prefix, $get, $state))
+                    ->dehydrateStateUsing(fn (Get $get, ?string $state): ?string => self::normalizePostalCodeFor($prefix, $get, $state))
                     ->live(onBlur: true)
                     ->afterStateUpdated(function (Get $get, Set $set, ?string $state) use ($prefix) {
                         if (blank($state)) {
                             self::clearLookupResults($prefix, $set);
 
                             return;
+                        }
+
+                        $normalized = self::normalizePostalCodeFor($prefix, $get, $state);
+
+                        if ($normalized !== $state) {
+                            $set($prefix.'.postalCode', $normalized);
                         }
 
                         self::autoLookup($prefix, $get, $set);
@@ -232,6 +245,15 @@ class AddressGroup
     public static function isCompleteDutchPostalCode(?string $value): bool
     {
         return PostcodeLookupService::isCompleteDutchPostalCode($value);
+    }
+
+    /**
+     * Normalise the postcode for the country currently selected in this
+     * address group.
+     */
+    private static function normalizePostalCodeFor(string $prefix, Get $get, ?string $state): ?string
+    {
+        return PostcodeLookupService::normalizePostalCode($state, self::normalizeCountry($get($prefix.'.country')));
     }
 
     /**
