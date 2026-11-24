@@ -2,6 +2,7 @@
 
 namespace Chargit\AddressComponent;
 
+use Baspa\ZipCodeLocationLookup\Exceptions\AddressNotFoundException;
 use Baspa\ZipCodeLocationLookup\ZipCodeLocationLookup;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Http;
@@ -74,6 +75,18 @@ class PostcodeLookupService
                 'latitude' => isset($result['lat']) ? (string) $result['lat'] : null,
                 'longitude' => isset($result['lng']) ? (string) $result['lng'] : null,
             ];
+        } catch (AddressNotFoundException $e) {
+            // Postcode.tech kent de combinatie niet. Dat is een definitief
+            // antwoord van het register, geen storing: de klant heeft zich
+            // waarschijnlijk vertypt, of vult het adres zelf in.
+            $this->sendNotFoundNotification();
+
+            Log::info('Postcode lookup found no address', [
+                'postalCode' => $postalCode,
+                'houseNumber' => $houseNumber,
+            ]);
+
+            return null;
         } catch (\Exception $e) {
             $this->sendErrorNotification();
 

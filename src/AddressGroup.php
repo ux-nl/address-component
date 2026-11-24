@@ -167,6 +167,7 @@ class AddressGroup
                     ->afterStateHydrated(fn (Select $component, mixed $state) => $component->state(self::normalizeCountry($state)))
                     ->extraInputAttributes(['autocomplete' => 'country']),
                 ...self::getCoordinateFields($prefix, $showCoordinates, $coordinatesRequired),
+                ...self::getLookupTrackingFields($prefix),
             ])
             ->columns(3)
             ->columnSpanFull();
@@ -241,6 +242,22 @@ class AddressGroup
     }
 
     /**
+     * Remember which street and city the last successful lookup filled in, so
+     * a lookup that finds nothing can clear exactly those and leave what the
+     * customer typed alone. Not dehydrated: these never reach the caller's
+     * payload.
+     *
+     * @return array<int, Hidden>
+     */
+    private static function getLookupTrackingFields(string $prefix): array
+    {
+        return [
+            Hidden::make($prefix.'.lookupStreet')->dehydrated(false),
+            Hidden::make($prefix.'.lookupCity')->dehydrated(false),
+        ];
+    }
+
+    /**
      * Whether the given value is a complete Dutch postal code.
      *
      * Delegates to the lookup service, which decides on the same rule whether
@@ -286,6 +303,36 @@ class AddressGroup
         $set($prefix.'.street', null);
         $set($prefix.'.city', null);
         self::clearCoordinates($prefix, $set);
+        self::forgetLookupResult($prefix, $set);
+    }
+
+    /**
+     * Clear the street and city a previous lookup filled in, after a lookup
+     * for the changed address found nothing. Without this, changing a known
+     * house number into a non-existent one kept the old street and city, and
+     * that address was saved. A street or city the customer typed or edited
+     * themselves no longer matches the remembered value and stays.
+     */
+    private static function clearPreviousLookupResult(string $prefix, Get $get, Set $set): void
+    {
+        $lookupStreet = $get($prefix.'.lookupStreet');
+        $lookupCity = $get($prefix.'.lookupCity');
+
+        if (filled($lookupStreet) && $get($prefix.'.street') === $lookupStreet) {
+            $set($prefix.'.street', null);
+        }
+
+        if (filled($lookupCity) && $get($prefix.'.city') === $lookupCity) {
+            $set($prefix.'.city', null);
+        }
+
+        self::forgetLookupResult($prefix, $set);
+    }
+
+    private static function forgetLookupResult(string $prefix, Set $set): void
+    {
+        $set($prefix.'.lookupStreet', null);
+        $set($prefix.'.lookupCity', null);
     }
 
     /**
@@ -323,7 +370,8 @@ class AddressGroup
      *
      * Street, city and GPS coordinates come from the lookup result. When the
      * lookup fails (or returns no coordinates) the GPS fields are cleared, so
-     * the coordinates of a previously entered address never linger.
+     * the coordinates of a previously entered address never linger. A failed
+     * lookup also clears the street and city an earlier lookup filled in.
      */
     private static function autoLookup(string $prefix, Get $get, Set $set): void
     {
@@ -348,12 +396,15 @@ class AddressGroup
 
         if (! $result) {
             self::clearCoordinates($prefix, $set);
+            self::clearPreviousLookupResult($prefix, $get, $set);
 
             return;
         }
 
         $set($prefix.'.street', $result['street']);
         $set($prefix.'.city', $result['city']);
+        $set($prefix.'.lookupStreet', $result['street']);
+        $set($prefix.'.lookupCity', $result['city']);
         self::setCoordinates($prefix, $set, $result['latitude'] ?? null, $result['longitude'] ?? null);
     }
 }
