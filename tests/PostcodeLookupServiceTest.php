@@ -1,7 +1,9 @@
 <?php
 
+use Baspa\ZipCodeLocationLookup\Exceptions\AddressNotFoundException;
 use Baspa\ZipCodeLocationLookup\ZipCodeLocationLookup;
 use Chargit\AddressComponent\PostcodeLookupService;
+use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -98,6 +100,24 @@ test('lookup returns null and logs error on exception', function () {
                 && isset($context['exception'])
                 && isset($context['trace']);
         });
+});
+
+// Postcode.tech kent de combinatie niet: dat is een tikfout of een adres dat
+// de klant zelf invult, geen storing. Dus de "niet gevonden"-melding en geen
+// errorlog, in plaats van "Er is iets misgegaan".
+test('lookup reports an unknown combination as not found instead of as an error', function () {
+    $mockLookup = Mockery::mock(ZipCodeLocationLookup::class);
+    $mockLookup->shouldReceive('lookup')
+        ->once()
+        ->andThrow(AddressNotFoundException::forCombination('1012JS', 999));
+
+    $result = (new PostcodeLookupService($mockLookup))->lookup('1012JS', '999');
+
+    expect($result)->toBeNull();
+
+    Notification::assertNotified('Adres niet gevonden');
+    Notification::assertNotNotified('Er is iets misgegaan');
+    Log::shouldNotHaveReceived('error');
 });
 
 test('lookup cleans postcode input by removing spaces and uppercasing', function () {

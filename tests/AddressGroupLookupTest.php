@@ -6,14 +6,16 @@ use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
+/**
+ * Mock the lookup service to return the given results in order, one per
+ * lookup; the last one repeats. A chain of andReturn() calls would not do
+ * that: Mockery keeps only the last value, so every lookup got the same
+ * result.
+ */
 function mockLookup(array|null ...$results): void
 {
     $mock = Mockery::mock(PostcodeLookupService::class);
-    $expectation = $mock->shouldReceive('lookup');
-
-    foreach ($results as $result) {
-        $expectation = $expectation->andReturn($result);
-    }
+    $mock->shouldReceive('lookup')->andReturn(...$results);
 
     app()->instance(PostcodeLookupService::class, $mock);
 }
@@ -101,6 +103,79 @@ test('a failed lookup clears the stale GPS coordinates of the previous address',
         ->assertSet('data.address.latitude', null)
         ->assertSet('data.address.longitude', null)
         ->assertSet('data.address.coordinates', null);
+});
+
+// Regressie (UAT): een bestaand huisnummer vulde straat en plaats, en na het
+// wijzigen naar een niet-bestaand huisnummer bleven die staan — en werden ze
+// opgeslagen bij het adres dat niet bestaat.
+test('a failed lookup clears the street and city the previous lookup filled in', function () {
+    mockLookup(
+        lookupResult('Dam', 'Amsterdam', '52.373', '4.893'),
+        null,
+    );
+
+    Livewire::test(AddressFormComponent::class)
+        ->set('data.address.postalCode', '1012JS')
+        ->set('data.address.houseNumber', '1')
+        ->assertSet('data.address.street', 'Dam')
+        ->set('data.address.houseNumber', '999')
+        ->assertSet('data.address.street', null)
+        ->assertSet('data.address.city', null);
+});
+
+// Regressie (UAT): eerst een niet-bestaand en daarna een bestaand huisnummer
+// moet het adres alsnog invullen.
+test('a known address after a failed lookup fills street and city', function () {
+    mockLookup(
+        null,
+        lookupResult('Dam', 'Amsterdam', '52.373', '4.893'),
+    );
+
+    Livewire::test(AddressFormComponent::class)
+        ->set('data.address.postalCode', '1012JS')
+        ->set('data.address.houseNumber', '999')
+        ->assertSet('data.address.street', null)
+        ->set('data.address.houseNumber', '1')
+        ->assertSet('data.address.street', 'Dam')
+        ->assertSet('data.address.city', 'Amsterdam');
+});
+
+test('a failed lookup keeps a street and city the customer typed themselves', function () {
+    mockLookup(
+        lookupResult('Dam', 'Amsterdam', '52.373', '4.893'),
+        null,
+    );
+
+    Livewire::test(AddressFormComponent::class)
+        ->set('data.address.postalCode', '1012JS')
+        ->set('data.address.houseNumber', '1')
+        ->set('data.address.street', 'Nieuwe Nieuwstraat')
+        ->set('data.address.houseNumber', '999')
+        ->assertSet('data.address.street', 'Nieuwe Nieuwstraat')
+        ->assertSet('data.address.city', null);
+});
+
+test('a failed lookup keeps an address that was not filled in by a lookup', function () {
+    mockLookup(null);
+
+    Livewire::test(AddressFormComponent::class)
+        ->fillForm(['address' => ['street' => 'Dam', 'city' => 'Amsterdam', 'country' => 'NLD']])
+        ->set('data.address.postalCode', '1012JS')
+        ->set('data.address.houseNumber', '999')
+        ->assertSet('data.address.street', 'Dam')
+        ->assertSet('data.address.city', 'Amsterdam');
+});
+
+test('the remembered lookup result is not part of the saved address', function () {
+    mockLookup(lookupResult('Dam', 'Amsterdam', '52.373', '4.893'));
+
+    Livewire::test(AddressFormComponent::class)
+        ->set('data.address.postalCode', '1012JS')
+        ->set('data.address.houseNumber', '1')
+        ->call('save')
+        ->assertSet('saved.address.street', 'Dam')
+        ->assertSet('saved.address', fn (array $address): bool => ! array_key_exists('lookupStreet', $address)
+            && ! array_key_exists('lookupCity', $address));
 });
 
 test('a lookup without coordinates clears the stale GPS coordinates', function () {
