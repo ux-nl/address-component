@@ -122,6 +122,12 @@ class AddressGroup
                     // de regex-regel vangt plak-/no-JS-invoer server-side af.
                     ->mask('9999999999')
                     ->rule('regex:/^[0-9]*$/')
+                    // Autofill of plakken levert soms een (harde) spatie of een
+                    // onzichtbaar teken rond het huisnummer op. Valideer en
+                    // bewaar het huisnummer zonder die tekens, zodat " 42" niet
+                    // als ongeldig huisnummer wordt geweigerd.
+                    ->mutateStateForValidationUsing(fn (?string $state): ?string => self::normalizeHouseNumber($state))
+                    ->dehydrateStateUsing(fn (?string $state): ?string => self::normalizeHouseNumber($state))
                     ->extraInputAttributes(['autocomplete' => 'address-line2', 'inputmode' => 'numeric'])
                     ->live(onBlur: true)
                     ->afterStateUpdated(function (Get $get, Set $set, ?string $state) use ($prefix) {
@@ -245,6 +251,21 @@ class AddressGroup
     public static function isCompleteDutchPostalCode(?string $value): bool
     {
         return PostcodeLookupService::isCompleteDutchPostalCode($value);
+    }
+
+    /**
+     * Strip every kind of whitespace and invisible character (non-breaking
+     * space, zero-width space, BOM) from a house number. A house number never
+     * contains a space; letters belong in 'Toevoeging' and are left alone so
+     * the regex rule still rejects them.
+     */
+    public static function normalizeHouseNumber(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return (string) preg_replace('/[\x{200B}-\x{200D}\x{2060}\x{FEFF}\p{Z}\s]+/u', '', $value);
     }
 
     /**
