@@ -243,3 +243,26 @@ test('a prefilled postcode opens in the same format it is saved in', function ()
         ->fillForm(['address' => ['postalCode' => '9423pe', 'country' => 'NLD']])
         ->assertSet('data.address.postalCode', '9423 PE');
 });
+
+test('a house number with surrounding spaces passes validation and is saved without them', function (string $value) {
+    mockLookup(null);
+
+    Livewire::test(AddressFormComponent::class)
+        ->fillForm(['address' => ['houseNumber' => $value, 'country' => 'NLD']])
+        ->call('save')
+        ->assertHasNoFormErrors()
+        ->assertSet('saved.address.houseNumber', '42');
+})->with([
+    'trailing space' => '42 ',
+    'non-breaking space' => "\u{00A0}42",
+    'zero-width space' => "42\u{200B}",
+]);
+
+test('a house number with letters is still rejected after cleaning it up', function () {
+    mockLookup(null);
+
+    Livewire::test(AddressFormComponent::class)
+        ->fillForm(['address' => ['houseNumber' => '42 a', 'country' => 'NLD']])
+        ->call('save')
+        ->assertHasFormErrors(['address.houseNumber']);
+});
